@@ -2,46 +2,49 @@ package portal
 
 import (
 	"context"
+	"time"
 
 	cid "github.com/ipfs/go-cid"
+	datastore "github.com/ipfs/go-datastore"
+	leveldb "github.com/ipfs/go-ds-leveldb"
 	provider "github.com/ipfs/go-ipfs-provider"
+	"github.com/ipfs/go-ipfs-provider/queue"
+	"github.com/ipfs/go-ipfs-provider/simple"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
-var BootstrapPeers = []string{
-	"/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-	"/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-	"/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-	"/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-	"/ip4/104.131.131.82/udp/4001/quic/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
-	"/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-}
+const ReprovideInterval = time.Hour * 12
 
 type backend interface {
+	BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error)
 	ChainDb() ethdb.Database
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
 }
 
 type service struct {
-	eth     backend
-	state   state.Database
-	host    host.Host
-	prov    provider.System
-	quit    chan bool
+	ctx    context.Context
+	eth    backend
+	state  state.Database
+	host   host.Host
+	prov   provider.System
+	cancel context.CancelFunc
+	dstore datastore.Datastore
 }
 
 func New(stack *node.Node, eth backend) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// node key does not work because curves are incompatible
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -54,17 +57,34 @@ func New(stack *node.Node, eth backend) error {
 		return err
 	}
 
-	prov, err := NewProvider(ctx, router, eth.ChainDb())
+	if err := Bootstrap(ctx, host); err != nil {
+		return err
+	}
+
+	dspath := stack.Config().ResolvePath("portaldata")
+	dstore, err := leveldb.NewDatastore(dspath, nil)
 	if err != nil {
 		return err
 	}
 
+	queue, err := queue.NewQueue(ctx, "reprovider", dstore)
+	if err != nil {
+		return err
+	}
+
+	bstore := NewBlockstore(eth.ChainDb())
+	bsprov := simple.NewBlockstoreProvider(bstore)
+	reprov := simple.NewReprovider(ctx, ReprovideInterval, router, bsprov)
+	prov := simple.NewProvider(ctx, queue, router)
+
 	stack.RegisterLifecycle(&service{
-		eth:   eth,
-		state: state.NewDatabase(eth.ChainDb()),
-		host:  host, 
-		prov:  prov,
-		quit:  make(chan bool),
+		ctx:    ctx,
+		eth:    eth,
+		host:   host,
+		cancel: cancel,
+		dstore: dstore,
+		prov:   provider.NewSystem(prov, reprov),
+		state:  state.NewDatabase(eth.ChainDb()),
 	})
 
 	return nil
@@ -73,74 +93,102 @@ func New(stack *node.Node, eth backend) error {
 func (svc *service) Start() error {
 	log.Info("Starting Portal Network", "peer_id", svc.host.ID().Pretty())
 	svc.prov.Run()
-	go svc.loop()
+	go svc.provideLoop()
 	return nil
 }
 
 func (svc *service) Stop() error {
 	log.Info("Stopping Portal Network")
+	svc.cancel()
 	svc.prov.Close()
-	close(svc.quit)
+	svc.dstore.Close()
 	return nil
 }
 
-// Loop listens for chain head events and provides new state to the portal network.
-func (svc *service) loop() {
+// provideLoop listens for chain head events and provides new state to the portal network.
+func (svc *service) provideLoop() {
 	headEventCh := make(chan core.ChainHeadEvent)
 	headEventSub := svc.eth.SubscribeChainHeadEvent(headEventCh)
 	defer headEventSub.Unsubscribe()
-	
+
 	for {
 		select {
 		case headEvent := <-headEventCh:
-			if err := svc.provide(headEvent.Block); err != nil {
+			if err := svc.provideState(headEvent.Block); err != nil {
 				log.Warn("Error providing state", "error", err)
 			}
 		case err := <-headEventSub.Err():
 			log.Warn("Error from chain head event subscription", "error", err)
 			return
-		case <-svc.quit:
+		case <-svc.ctx.Done():
 			return
 		}
 	}
 }
 
-// provide iterates all state nodes and provides them to the portal network.
-func (svc *service) provide(block *types.Block) error {
-	stateTrie, err := svc.state.OpenTrie(block.Root())
+// provideState provides new state nodes to the portal network.
+func (svc *service) provideState(block *types.Block) error {
+	parent, err := svc.eth.BlockByHash(svc.ctx, block.ParentHash())
 	if err != nil {
 		return err
 	}
 
-	stateIter := stateTrie.NodeIterator(nil)
-	for stateIter.Next(true) {
-		stateCID := Keccak256ToCid(cid.EthStateTrie, stateIter.Hash())
-		svc.prov.Provide(stateCID)
+	oldTrie, err := svc.state.OpenTrie(parent.Root())
+	if err != nil {
+		return err
+	}
 
-		if !stateIter.Leaf() {
+	newTrie, err := svc.state.OpenTrie(block.Root())
+	if err != nil {
+		return err
+	}
+
+	// iterate all differences between the new state and parent state
+	it, _ := trie.NewDifferenceIterator(oldTrie.NodeIterator(nil), newTrie.NodeIterator(nil))
+	for it.Next(true) {
+		// attempt to provide new state CID
+		id := Keccak256ToCid(cid.EthStateTrie, it.Hash())
+		if err := svc.prov.Provide(id); err != nil {
+			log.Warn("Failed to provide state", "error", err)
+		} else {
+			log.Info("Provided state", "CID", id.String())
+		}
+
+		// if leaf node traverse storage
+		if !it.Leaf() {
 			continue
 		}
 
-		var acc types.StateAccount
-		if err := rlp.DecodeBytes(stateIter.LeafBlob(), &acc); err != nil {
-			return err
-		}
-
-		storageTrie, err := svc.state.OpenTrie(acc.Root)
-		if err != nil {
-			return err
-		}
-
-		storageIter := storageTrie.NodeIterator(nil)
-		for storageIter.Next(true) {
-			storageCID := Keccak256ToCid(cid.EthStateTrie, storageIter.Hash())
-			svc.prov.Provide(storageCID)
-		}
-
-		if err := storageIter.Error(); err != nil {
-			log.Warn("Failed to iterate storage", "error", err)
+		if err := svc.provideStorage(it.LeafBlob()); err != nil {
+			log.Warn("Failed to provide storage", "error", err)
 		}
 	}
 
-	return stateIter.Error()
+	return it.Error()
+}
+
+// provideStorage provides new storage nodes to the portal network.
+func (svc *service) provideStorage(blob []byte) error {
+	var acc types.StateAccount
+	if err := rlp.DecodeBytes(blob, &acc); err != nil {
+		return err
+	}
+
+	storageTrie, err := svc.state.OpenTrie(acc.Root)
+	if err != nil {
+		return err
+	}
+
+	it := storageTrie.NodeIterator(nil)
+	for it.Next(true) {
+		// attempt to provide new storage CID
+		id := Keccak256ToCid(cid.EthStateTrie, it.Hash())
+		if err := svc.prov.Provide(id); err != nil {
+			log.Warn("Failed to provide storage", "error", err)
+		} else {
+			log.Info("Provided storage", "CID", id.String())
+		}
+	}
+
+	return it.Error()
 }

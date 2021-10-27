@@ -8,11 +8,35 @@ import (
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	noise "github.com/libp2p/go-libp2p-noise"
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
+	multiaddr "github.com/multiformats/go-multiaddr"
 )
+
+var BootstrapPeers = []multiaddr.Multiaddr{
+	multiaddr.StringCast("/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa"),
+	multiaddr.StringCast("/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb"),
+	multiaddr.StringCast("/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt"),
+	multiaddr.StringCast("/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"),
+	multiaddr.StringCast("/ip4/104.131.131.82/udp/4001/quic/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"),
+	multiaddr.StringCast("/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"),
+}
+
+func Bootstrap(ctx context.Context, host host.Host) error {
+	peerInfo, err := peer.AddrInfosFromP2pAddrs(BootstrapPeers...)
+	if err != nil {
+		return err
+	}
+
+	for _, info := range peerInfo {
+		go host.Connect(ctx, info)
+	}
+
+	return nil
+}
 
 func NewHost(ctx context.Context, priv crypto.PrivKey) (host.Host, routing.Routing, error) {
 	var router routing.Routing

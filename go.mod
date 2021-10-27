@@ -44,6 +44,7 @@ require (
 	github.com/ipfs/go-block-format v0.0.3
 	github.com/ipfs/go-cid v0.1.0
 	github.com/ipfs/go-datastore v0.4.6
+	github.com/ipfs/go-ds-leveldb v0.4.2 // indirect
 	github.com/ipfs/go-ipfs-provider v0.6.1
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
@@ -59,6 +60,7 @@ require (
 	github.com/libp2p/go-libp2p-tls v0.2.0
 	github.com/mattn/go-colorable v0.1.8
 	github.com/mattn/go-isatty v0.0.13
+	github.com/multiformats/go-multiaddr v0.4.0 // indirect
 	github.com/multiformats/go-multihash v0.0.16
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
