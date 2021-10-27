@@ -10,13 +10,13 @@ import (
 	provider "github.com/ipfs/go-ipfs-provider"
 	"github.com/ipfs/go-ipfs-provider/queue"
 	"github.com/ipfs/go-ipfs-provider/simple"
-	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
@@ -46,24 +46,28 @@ type service struct {
 func New(stack *node.Node, eth backend) error {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// node key does not work because curves are incompatible
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	if err != nil {
-		return err
-	}
-
-	host, router, err := NewHost(ctx, priv)
-	if err != nil {
-		return err
-	}
-
-	if err := Bootstrap(ctx, host); err != nil {
-		return err
-	}
-
+	// datastore is used to track reprovides and peers
 	dspath := stack.Config().ResolvePath("portaldata")
 	dstore, err := leveldb.NewDatastore(dspath, nil)
 	if err != nil {
+		return err
+	}
+
+	// use the node key as the libp2p key
+	nodeKey := stack.Config().NodeKey()
+	nodeKeyBytes := crypto.FromECDSA(nodeKey)
+
+	hostKey, err := NodeKeyToHostKey(nodeKeyBytes)
+	if err != nil {
+		return err
+	}
+
+	host, router, err := NewHost(ctx, hostKey, dstore)
+	if err != nil {
+		return err
+	}
+
+	if err := Bootstrap(ctx, host, router); err != nil {
 		return err
 	}
 
@@ -150,8 +154,6 @@ func (svc *service) provideState(block *types.Block) error {
 		id := Keccak256ToCid(cid.EthStateTrie, it.Hash())
 		if err := svc.prov.Provide(id); err != nil {
 			log.Warn("Failed to provide state", "error", err)
-		} else {
-			log.Info("Provided state", "CID", id.String())
 		}
 
 		// if leaf node traverse storage
@@ -185,8 +187,6 @@ func (svc *service) provideStorage(blob []byte) error {
 		id := Keccak256ToCid(cid.EthStateTrie, it.Hash())
 		if err := svc.prov.Provide(id); err != nil {
 			log.Warn("Failed to provide storage", "error", err)
-		} else {
-			log.Info("Provided storage", "CID", id.String())
 		}
 	}
 

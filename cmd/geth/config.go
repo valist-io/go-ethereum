@@ -162,7 +162,7 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
 	// Configure Portal Network
-	utils.RegisterPortalNetworkService(stack, backend)	
+	utils.RegisterPortalNetworkService(stack, backend)
 
 	// Configure catalyst.
 	if ctx.GlobalBool(utils.CatalystFlag.Name) {

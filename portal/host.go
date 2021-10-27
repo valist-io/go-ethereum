@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	datastore "github.com/ipfs/go-datastore"
 	libp2p "github.com/libp2p/go-libp2p"
 	connmgr "github.com/libp2p/go-libp2p-connmgr"
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -11,7 +12,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/routing"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	dualdht "github.com/libp2p/go-libp2p-kad-dht/dual"
 	noise "github.com/libp2p/go-libp2p-noise"
+	record "github.com/libp2p/go-libp2p-record"
 	libp2ptls "github.com/libp2p/go-libp2p-tls"
 	multiaddr "github.com/multiformats/go-multiaddr"
 )
@@ -25,7 +28,11 @@ var BootstrapPeers = []multiaddr.Multiaddr{
 	multiaddr.StringCast("/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"),
 }
 
-func Bootstrap(ctx context.Context, host host.Host) error {
+func NodeKeyToHostKey(key []byte) (crypto.PrivKey, error) {
+	return crypto.UnmarshalSecp256k1PrivateKey(key)
+}
+
+func Bootstrap(ctx context.Context, host host.Host, router routing.Routing) error {
 	peerInfo, err := peer.AddrInfosFromP2pAddrs(BootstrapPeers...)
 	if err != nil {
 		return err
@@ -35,12 +42,19 @@ func Bootstrap(ctx context.Context, host host.Host) error {
 		go host.Connect(ctx, info)
 	}
 
-	return nil
+	return router.Bootstrap(ctx)
 }
 
-func NewHost(ctx context.Context, priv crypto.PrivKey) (host.Host, routing.Routing, error) {
+func NewHost(ctx context.Context, priv crypto.PrivKey, ds datastore.Batching) (host.Host, routing.Routing, error) {
 	var router routing.Routing
 	var err error
+
+	dhtopts := []dualdht.Option{
+		dualdht.DHTOption(dht.NamespacedValidator("pk", record.PublicKeyValidator{})),
+		dualdht.DHTOption(dht.Concurrency(10)),
+		dualdht.DHTOption(dht.Mode(dht.ModeAuto)),
+		dualdht.DHTOption(dht.Datastore(ds)),
+	}
 
 	host, err := libp2p.New(ctx,
 		// Use the keypair we generated
@@ -67,7 +81,7 @@ func NewHost(ctx context.Context, priv crypto.PrivKey) (host.Host, routing.Routi
 		libp2p.NATPortMap(),
 		// Let this host use the DHT to find other hosts
 		libp2p.Routing(func(h host.Host) (routing.PeerRouting, error) {
-			router, err = dht.New(ctx, h)
+			router, err = dualdht.New(ctx, h, dhtopts...)
 			return router, err
 		}),
 		// Let this host use relays and advertise itself on relays if
