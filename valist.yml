@@ -1,0 +1,4 @@
+name: valist/go-ethereum
+tag: 0.0.1
+artifacts:
+  geth: build/bin/geth
