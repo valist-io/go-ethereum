@@ -46,18 +46,18 @@ type service struct {
 func New(stack *node.Node, eth backend) error {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// datastore is used to track reprovides and peers
-	dspath := stack.Config().ResolvePath("portaldata")
-	dstore, err := leveldb.NewDatastore(dspath, nil)
-	if err != nil {
-		return err
-	}
-
 	// use the node key as the libp2p key
 	nodeKey := stack.Config().NodeKey()
 	nodeKeyBytes := crypto.FromECDSA(nodeKey)
 
 	hostKey, err := NodeKeyToHostKey(nodeKeyBytes)
+	if err != nil {
+		return err
+	}
+
+	// datastore is used to track reprovides and peers
+	dspath := stack.Config().ResolvePath("portaldata")
+	dstore, err := leveldb.NewDatastore(dspath, nil)
 	if err != nil {
 		return err
 	}
@@ -76,6 +76,7 @@ func New(stack *node.Node, eth backend) error {
 		return err
 	}
 
+	// reprovide old and new blocks from the chain db
 	bstore := NewBlockstore(eth.ChainDb())
 	bsprov := simple.NewBlockstoreProvider(bstore)
 	reprov := simple.NewReprovider(ctx, ReprovideInterval, router, bsprov)
@@ -95,14 +96,14 @@ func New(stack *node.Node, eth backend) error {
 }
 
 func (svc *service) Start() error {
-	log.Info("Starting Portal Network", "peer_id", svc.host.ID().Pretty())
+	log.Info("Started portal network", "peer_id", svc.host.ID().Pretty())
 	svc.prov.Run()
 	go svc.provideLoop()
 	return nil
 }
 
 func (svc *service) Stop() error {
-	log.Info("Stopping Portal Network")
+	log.Info("Stopped portal network")
 	svc.cancel()
 	svc.prov.Close()
 	svc.dstore.Close()
@@ -132,6 +133,9 @@ func (svc *service) provideLoop() {
 
 // provideState provides new state nodes to the portal network.
 func (svc *service) provideState(block *types.Block) error {
+	rootId := Keccak256ToCid(cid.EthStateTrie, block.Root())
+	log.Info("Providing state", "CID", rootId.String())
+
 	parent, err := svc.eth.BlockByHash(svc.ctx, block.ParentHash())
 	if err != nil {
 		return err
