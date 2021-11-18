@@ -66,7 +66,6 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/portal"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
 	"gopkg.in/urfave/cli.v1"
@@ -780,6 +779,11 @@ var (
 	CatalystFlag = cli.BoolFlag{
 		Name:  "catalyst",
 		Usage: "Catalyst mode (eth2 integration testing)",
+	}
+
+	GraphSyncFlag = cli.BoolFlag{
+		Name:  "graphsync",
+		Usage: "Enable a GraphSync exchange",
 	}
 )
 
@@ -1719,13 +1723,6 @@ func RegisterEthStatsService(stack *node.Node, backend ethapi.Backend, url strin
 func RegisterGraphQLService(stack *node.Node, backend ethapi.Backend, cfg node.Config) {
 	if err := graphql.New(stack, backend, cfg.GraphQLCors, cfg.GraphQLVirtualHosts); err != nil {
 		Fatalf("Failed to register the GraphQL service: %v", err)
-	}
-}
-
-// RegisterPortalNetworkService is a utility function to register a portal network service to the given node.
-func RegisterPortalNetworkService(stack *node.Node, backend ethapi.Backend) {
-	if err := portal.New(stack, backend); err != nil {
-		Fatalf("Failed to register the Portal Network service: %v", err)
 	}
 }
 

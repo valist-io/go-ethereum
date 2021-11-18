@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/eth/catalyst"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
+	"github.com/ethereum/go-ethereum/graphsync"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -161,9 +162,15 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	}
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
-	// Configure Portal Network
-	utils.RegisterPortalNetworkService(stack, backend)
-
+	// Configure GraphSync
+	if ctx.GlobalBool(utils.GraphSyncFlag.Name) {
+		if eth == nil {
+			utils.Fatalf("GraphSync does not work in light client mode.")
+		}
+		if err := graphsync.Register(stack, eth); err != nil {
+			utils.Fatalf("%v", err)
+		}
+	}
 	// Configure catalyst.
 	if ctx.GlobalBool(utils.CatalystFlag.Name) {
 		if eth == nil {
