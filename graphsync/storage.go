@@ -34,26 +34,15 @@ func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, ctx.Err()
 	}
 
-	id := cidFromString(key)
-	nh := cidToKeccak256(id)
-
-	return s.db.Node(nh)
-}
-
-// cidToKeccak256 returns the keccak hash from the given CID.
-func cidToKeccak256(id cid.Cid) common.Hash {
-	dec, err := multihash.Decode(id.Hash())
-	if err != nil {
-		panic(err)
-	}
-	return common.BytesToHash(dec.Digest)
-}
-
-// cidFromString converts the given CID key string to a CID.
-func cidFromString(key string) cid.Cid {
 	_, id, err := cid.CidFromBytes([]byte(key))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return id
+
+	dec, err := multihash.Decode(id.Hash())
+	if err != nil {
+		return nil, err
+	}
+	
+	return s.db.Node(common.BytesToHash(dec.Digest))
 }
