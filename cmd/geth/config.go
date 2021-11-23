@@ -164,10 +164,7 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 
 	// Configure GraphSync
 	if ctx.GlobalBool(utils.GraphSyncFlag.Name) {
-		if eth == nil {
-			utils.Fatalf("GraphSync does not work in light client mode.")
-		}
-		if err := graphsync.Register(stack, eth); err != nil {
+		if err := graphsync.Register(stack, backend); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}
