@@ -44,7 +44,7 @@ func (s *Storage) Has(ctx context.Context, key string) (bool, error) {
 				return false, nil
 			}
 			return rawdb.HasHeader(s.db, hash, *number), nil
-		case cid.EthTxTrie, cid.EthTxReceiptTrie, cid.EthStateTrie, cid.EthStorageTrie:
+		case cid.EthStateTrie, cid.EthStorageTrie:
 			return s.db.Has(dec.Digest)
 		default:
 			return false, fmt.Errorf("invalid multicodec %x", codec)
@@ -72,7 +72,7 @@ func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
 				return nil, fmt.Errorf("header number not found")
 			}
 			return rawdb.ReadHeaderRLP(s.db, hash, *number), nil
-		case cid.EthTxTrie, cid.EthTxReceiptTrie, cid.EthStateTrie, cid.EthStorageTrie:
+		case cid.EthStateTrie, cid.EthStorageTrie:
 			return rawdb.ReadTrieNode(s.db, hash), nil
 		default:
 			return nil, fmt.Errorf("invalid multicodec %x", codec)

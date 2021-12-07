@@ -7,6 +7,7 @@ import (
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	libp2p "github.com/libp2p/go-libp2p"
 	libp2p_crypto "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -16,6 +17,18 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 )
+
+var listenAddrStrings = libp2p.ListenAddrStrings(
+	"/ip4/0.0.0.0/tcp/9000", 
+	"/ip4/0.0.0.0/udp/9000/quic",
+)
+
+var graphsyncOptions = []gsimpl.Option {
+	gsimpl.MaxMemoryResponder(uint64(4096 << 20)),
+	gsimpl.MaxMemoryPerPeerResponder(uint64(1024 << 20)),
+	gsimpl.MaxInProgressIncomingRequests(uint64(64)),
+	gsimpl.MaxInProgressIncomingRequestsPerPeer(uint64(16)),
+}
 
 type service struct {
 	host     host.Host
@@ -34,8 +47,7 @@ func Register(stack *node.Node, backend ethapi.Backend) error {
 	if err != nil {
 		return err
 	}
-
-	host, _, err := NewHost(ctx, hostKey)
+	host, err := libp2p.New(libp2p.Identity(hostKey), listenAddrStrings)
 	if err != nil {
 		return err
 	}
@@ -48,17 +60,8 @@ func Register(stack *node.Node, backend ethapi.Backend) error {
 	network := gsnet.NewFromLibp2pHost(host)
 	exchange := gsimpl.New(ctx, network, linkSys)
 
-	// exchange.RegisterBlockSentListener(func(p peer.ID, _ graphsync.RequestData, blockData graphsync.BlockData) {
-	// 	log.Info("GraphSync Block Sent", "peer_id", p.Pretty(), "cid", blockData.Link().String())
-	// })
 	exchange.RegisterIncomingRequestHook(func(p peer.ID, _ graphsync.RequestData, _ graphsync.IncomingRequestHookActions) {
 		log.Info("GraphSync Incoming Request", "peer_id", p.Pretty())
-	})
-	exchange.RegisterNetworkErrorListener(func(p peer.ID, _ graphsync.RequestData, err error) {
-		log.Warn("GraphSync Network Error", "error", err.Error())
-	})
-	exchange.RegisterReceiverNetworkErrorListener(func(p peer.ID, err error) {
-		log.Warn("GraphSync Receiver Network Error", "error", err.Error())
 	})
 	exchange.RegisterCompletedResponseListener(func(p peer.ID, _ graphsync.RequestData, status graphsync.ResponseStatusCode) {
 		log.Info("GraphSync Completed Response", "peer_id", p.Pretty(), "status", status)

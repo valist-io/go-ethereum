@@ -44,13 +44,9 @@ require (
 	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/karalabe/usb v0.0.0-20211005121534-4c5740d64559
-	github.com/libp2p/go-libp2p v0.15.0
-	github.com/libp2p/go-libp2p-connmgr v0.2.4
-	github.com/libp2p/go-libp2p-core v0.9.0
-	github.com/libp2p/go-libp2p-kad-dht v0.13.1
-	github.com/libp2p/go-libp2p-noise v0.2.2
-	github.com/libp2p/go-libp2p-quic-transport v0.12.0 // indirect
-	github.com/libp2p/go-libp2p-tls v0.2.0
+	github.com/libp2p/go-libp2p v0.16.0
+	github.com/libp2p/go-libp2p-core v0.11.0
+	github.com/libp2p/go-libp2p-record v0.1.3 // indirect
 	github.com/mattn/go-colorable v0.1.8
 	github.com/mattn/go-isatty v0.0.13
 	github.com/multiformats/go-multihash v0.1.0
